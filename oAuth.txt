@@ -1,0 +1,158 @@
+1. Add Dependencies
+Make sure you have the necessary dependencies in your pom.xml for Spring Security and OAuth2 Client:
+
+xml
+
+Verify
+
+Open In Editor
+Run
+Copy code
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-oauth2-client</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-security</artifactId>
+</dependency>
+2. Configure Google OAuth2
+You need to configure your application to use Google as an OAuth2 provider. This can be done in your application.properties or application.yml file:
+
+properties
+
+Verify
+
+Open In Editor
+Run
+Copy code
+spring.security.oauth2.client.registration.google.client-id=YOUR_CLIENT_ID
+spring.security.oauth2.client.registration.google.client-secret=YOUR_CLIENT_SECRET
+spring.security.oauth2.client.registration.google.scope=profile, email
+spring.security.oauth2.client.registration.google.redirect-uri={baseUrl}/login/oauth2/code/{registrationId}
+spring.security.oauth2.client.provider.google.authorization-uri=https://accounts.google.com/o/oauth2/auth
+spring.security.oauth2.client.provider.google.token-uri=https://oauth2.googleapis.com/token
+spring.security.oauth2.client.provider.google.user-info-uri=https://www.googleapis.com/oauth2/v3/userinfo
+spring.security.oauth2.client.provider.google.user-name-attribute=sub
+Replace YOUR_CLIENT_ID and YOUR_CLIENT_SECRET with the credentials you get from the Google Developer Console.
+
+3. Create a Controller for OAuth2 Login
+You need to create a controller that will handle the OAuth2 login process. This controller will be responsible for processing the user information returned by Google and creating a new user in your database if they do not exist.
+
+java
+
+Verify
+
+Open In Editor
+Run
+Copy code
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public class OAuth2LoginController {
+
+    @Autowired
+    private UserService userService;
+
+    @GetMapping("/login/oauth2/code/google")
+    public ResponseEntity<UserResponse> googleLogin(OAuth2AuthenticationToken authentication) {
+        String email = authentication.getPrincipal().getAttribute("email");
+        String fullName = authentication.getPrincipal().getAttribute("name");
+
+        // Check if user exists in the database
+        User user = userService.findByEmail(email);
+        if (user == null) {
+            // Create a new user if not exists
+            user = new User();
+            user.setEmail(email);
+            user.setFullName(fullName);
+            user.setUser Name(email); // or generate a unique username
+            user.setPassword("N/A"); // No password needed for OAuth users
+            userService.createUser (user);
+        }
+
+        // Generate JWT token for the user
+        String jwtToken = jwtService.generateToken(user);
+        UserResponse userResponse = new UserResponse(user.getUser Id(), user.getUsername(), jwtToken, "User  logged in successfully", null, "");
+
+        return ResponseEntity.ok(userResponse);
+    }
+}
+4. Update UserService
+You need to add a method in your User Service to find a user by email:
+
+java
+
+Verify
+
+Open In Editor
+Run
+Copy code
+public User findByEmail(String email) {
+    return userRepository.findByEmail(email)
+            .orElse(null); // Return null if not found
+}
+5. Update Security Configuration
+Make sure your security configuration allows access to the OAuth2 login endpoint:
+
+java
+
+Verify
+
+Open In Editor
+Run
+Copy code
+.authorizeHttpRequests((requests) -> requests
+        .requestMatchers("/auth/login", "/auth/create", "/login/oauth2/**", "/country/all", "/state/*", "/city/*", "/auth/forgotpassword", "/auth/verifyotp", "/auth/updatepassword", "/auth/refresh", "/role/all")
+        .permitAll()
+        .anyRequest()
+        .authenticated())
+6. Handle User Creation Logic
+In the googleLogin method, you can customize how you want to create a user in your database. You might want to set default values for certain fields or handle roles differently.
+
+7. Test the Integration
+After implementing the above changes, you can test the Google OAuth2 login by navigating to the /login/oauth2/authorization/google endpoint. This should redirect you to the Google login page, and upon successful authentication, it should redirect back to your application and create a user if they do not exist.
+
+Conclusion
+By following these steps, you should be able to integrate Google OAuth2 login into your Spring Boot application. Make sure to handle any exceptions and edge cases as needed, and test thoroughly to ensure a smooth user experience.### 8. Update User Entity
+
+You may want to update your User entity to accommodate any additional fields you might want to store from the Google profile, such as image or locale. For example:
+
+java
+
+Verify
+
+Open In Editor
+Run
+Copy code
+@Column(name = "locale")
+private String locale;
+
+@Column(name = "image")
+private String image;
+9. Modify the User Creation Logic
+When creating a new user in the googleLogin method, you can also retrieve and set the user's profile image URL from Google:
+
+java
+
+Verify
+
+Open In Editor
+Run
+Copy code
+String imageUrl = authentication.getPrincipal().getAttribute("picture");
+user.setImage(imageUrl);
+10. Update the User Repository
+Ensure your UserRepository has a method to find users by email:
+
+java
+
+Verify
+
+Open In Editor
+Run
+Copy code
+Optional<User> findByEmail(String email);
