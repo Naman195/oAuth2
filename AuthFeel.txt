@@ -1,0 +1,407 @@
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.core.user.OAuth2User ;
+import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
+import org.springframework.stereotype.Component;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+
+@Component
+public class CustomOAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
+
+    @Autowired
+    private UserService userService; // Your service to handle user operations
+
+    @Autowired
+    private JwtService jwtService; // Your service to generate JWT tokens
+
+    @Autowired
+    private RefreshTokenService refreshTokenService; // Your service to handle refresh tokens
+
+    @Override
+    public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
+                                        Authentication authentication) throws IOException {
+        OAuth2User  principal = (OAuth2User ) authentication.getPrincipal();
+        String email = principal.getAttribute("email"); // Get the user's email from the OAuth2 provider
+
+        // Check if the user exists in your database
+        User user = userService.findByEmail(email);
+        if (user == null) {
+            // User not found, handle accordingly (e.g., throw an exception or return an error response)
+            response.sendError(HttpServletResponse.SC_FORBIDDEN, "User  not found in the database.");
+            return;
+        }
+
+        // Generate JWT and Refresh Token
+        String jwtToken = jwtService.generateToken(user);
+        RefreshToken refreshToken = refreshTokenService.createRefreshToken(user.getUsername());
+
+        // Optionally, save the token in the database
+        Token token = Token.builder()
+                .tokenValue(jwtToken)
+                .userId(user.getUser Id())
+                .expiresAt(jwtService.getExp(jwtToken))
+                .build();
+        tokenRepository.save(token);
+
+        // Set the tokens in the response (you can also redirect to a frontend URL)
+        response.setHeader("Authorization", "Bearer " + jwtToken);
+        response.setHeader("Refresh-Token", refreshToken.getRefreshToken());
+        response.sendRedirect("http://localhost:3000/dashboard"); // Redirect to your frontend
+    }
+}
+
+
+
+
+
+
+
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.web.SecurityFilterChain;
+
+@Configuration
+@EnableWebSecurity
+public class SecurityConfiguration {
+
+    @Autowired
+    private CustomOAuth2LoginSuccessHandler customOAuth2LoginSuccessHandler;
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf().disable()
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+            .authorizeHttpRequests()
+            .requestMatchers("/auth/login", "/auth/create", "/login/oauth2/**", "/auth/user-info").permitAll()
+            .anyRequest().authenticated()
+            .and()
+            .oauth2Login()
+            .successHandler(customOAuth2LoginSuccessHandler); // Use the custom success handler
+
+        return http.build();
+    }
+}
+
+
+
+
+
+
+
+
+public User findByEmail(String email) {
+    return userRepository.findByEmail(email)
+            .orElse(null); // Return null if user not found
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Certainly! Let's break down the flow of your OAuth2 implementation step by step, focusing on how the code you provided works in conjunction with the OAuth2 process. This will help you understand how the authentication flow operates when a user logs in using Google OAuth2.
+
+Overview of OAuth2 Flow
+User Initiates Login: The user clicks a "Login with Google" button in your frontend application.
+Redirect to Google Authorization Server: The application redirects the user to the Google Authorization Server to request authorization.
+User Grants Permission: The user logs in (if not already logged in) and grants permission to your application.
+Authorization Code Received: Google redirects back to your application with an authorization code.
+Exchange Code for Access Token: Your application sends a request to Google’s token endpoint to exchange the authorization code for an access token.
+Access Token Received: Google responds with an access token (and possibly a refresh token).
+Access User Information: Your application can now use the access token to access user information from Google.
+User Validation: Your application checks if the user exists in your database.
+Generate JWT and Refresh Token: If the user exists, your application generates a JWT and refresh token for the user.
+Detailed Flow of Your Code
+Step 1: User Initiates Login
+The user clicks the "Login with Google" button in your frontend application, which triggers a redirect to the Google Authorization Server. This is typically done by navigating to a URL like:
+
+
+Verify
+
+Open In Editor
+Run
+Copy code
+https://accounts.google.com/o/oauth2/v2/auth?client_id=YOUR_CLIENT_ID&redirect_uri=YOUR_REDIRECT_URI&response_type=code&scope=profile%20email
+Step 2: Redirect to Google Authorization Server
+The user is redirected to the Google login page, where they can log in and grant permission to your application.
+Step 3: User Grants Permission
+After the user logs in and grants permission, Google redirects back to your application with an authorization code. The redirect URI will look something like this:
+
+
+Verify
+
+Open In Editor
+Run
+Copy code
+http://localhost:8080/login/oauth2/code/google?code=AUTHORIZATION_CODE&state=STATE
+Step 4: Authorization Code Received
+Your Spring Boot application has a configured endpoint to handle this redirect. The Spring Security OAuth2 client automatically handles this part, and you don't need to write additional code for it.
+Step 5: Exchange Code for Access Token
+After receiving the authorization code, Spring Security will automatically exchange it for an access token by making a request to Google's token endpoint. This is handled internally by Spring Security, so you don't see this in your code.
+Step 6: Access Token Received
+Once the access token is received, Spring Security will create an OAuth2AuthenticationToken that contains the user's details and the access token.
+Step 7: Access User Information
+When the user accesses the /auth/user-info endpoint, your controller method is invoked:
+java
+
+Verify
+
+Open In Editor
+Run
+Copy code
+@GetMapping("/user-info")
+public Map<String, Object> user(@AuthenticationPrincipal OAuth2User  principal) {
+    if (principal == null) {
+        throw new RuntimeException("User  not authenticated");
+    }
+    System.out.println(principal);
+    return principal.getAttributes();
+}
+The @AuthenticationPrincipal annotation injects the OAuth2User  object, which contains the user's information retrieved from Google. If the user is authenticated, you can access their attributes (like email, name, etc.) using principal.getAttributes().
+Step 8: User Validation
+In your custom OAuth2 success handler (which you would need to implement), you would check if the user exists in your database:
+java
+
+Verify
+
+Open In Editor
+Run
+Copy code
+if (user == null) {
+    response.sendError(HttpServletResponse.SC_FORBIDDEN, "User  not found in the database.");
+    return;
+}
+If the user does not exist, you can return an error response, preventing them from logging in.
+Step 9: Generate JWT and Refresh Token
+If the user exists in your database, you can generate a JWT and refresh token:
+java
+
+Verify
+
+Open In Editor
+Run
+Copy code
+String jwtToken = jwtService.generateToken(user);
+RefreshToken refreshToken = refreshTokenService.createRefreshToken(user.getUsername());
+You can then save the token in your database if needed and set the tokens in the response headers:
+java
+
+Verify
+
+Open In Editor
+Run
+Copy code
+response.setHeader("Authorization", "Bearer " + jwtToken);
+response.setHeader("Refresh-Token", refreshToken.getRefreshToken());
+response.sendRedirect("http://localhost:3000/dashboard"); // Redirect to your frontend
+Summary of the Flow
+User clicks "Login with Google" → Redirects to Google Authorization Server.
+User logs in and grants permission → Google redirects back with an authorization code.
+Spring Security exchanges the code for an access token → User information is retrieved.
+User accesses /auth/user-info → Your controller retrieves user attributes.
+Check if user exists in the database → If not, return an error.
+Generate JWT and refresh token → Set tokens in the response and redirect to the frontend.
+Conclusion
+This flow allows you to authenticate users using Google OAuth2 while ensuring that only users who exist in your database can log in. By generating JWT and refresh tokens, you can manage user sessions effectively. If you have any further questions or need clarification on any part of the process, feel free to ask!
+
+
+
+
+
+
+
+
+
+
+
+
+logging.level.org.springframework.security=DEBUG
+
+
+
+
+
+i want to feel the All steps so is there any way
+
+BLACKBOXAI
+
+To fully understand and visualize each step of the OAuth2 flow, including the authorization code exchange and token retrieval, you can manually simulate the process using tools like Postman, along with logging and debugging in your Spring Boot application. Here’s a comprehensive guide on how to do this:
+
+Step-by-Step Guide to Visualize the OAuth2 Flow
+Step 1: Set Up Your Environment
+Ensure Your Spring Boot Application is Running: Make sure your Spring Boot application is up and running, and that you have configured OAuth2 with Google correctly.
+
+Postman Installed: Make sure you have Postman installed to manually test the OAuth2 flow.
+
+Enable Debug Logging: Add the following line to your application.properties to enable debug logging for Spring Security:
+
+properties
+
+Verify
+
+Open In Editor
+Run
+Copy code
+logging.level.org.springframework.security=DEBUG
+Step 2: Obtain Authorization Code
+Open Postman: Create a new request.
+
+Set Up the Authorization Request:
+
+Set the request type to GET.
+Enter the following URL, replacing YOUR_CLIENT_ID and YOUR_REDIRECT_URI with your actual values:
+
+Verify
+
+Open In Editor
+Run
+Copy code
+https://accounts.google.com/o/oauth2/v2/auth?client_id=YOUR_CLIENT_ID&redirect_uri=YOUR_REDIRECT_URI&response_type=code&scope=profile%20email
+Example:
+
+
+Verify
+
+Open In Editor
+Run
+Copy code
+https://accounts.google.com/o/oauth2/v2/auth?client_id=1234567890-abcde12345.apps.googleusercontent.com&redirect_uri=http://localhost:8080/login/oauth2/code/google&response_type=code&scope=profile%20email
+Send the Request: Click "Send". This will redirect you to the Google login page in your browser.
+
+Log In and Grant Permission: Log in with your Google account and grant permission to your application.
+
+Capture the Authorization Code: After granting permission, Google will redirect back to your specified redirect URI with an authorization code. The URL will look something like this:
+
+
+Verify
+
+Open In Editor
+Run
+Copy code
+http://localhost:8080/login/oauth2/code/google?code=AUTHORIZATION_CODE&state=STATE
+Copy the AUTHORIZATION_CODE from the URL.
+
+Step 3: Exchange Authorization Code for Access Token
+Create a New Request in Postman:
+
+Set the request type to POST.
+Enter the following URL:
+
+Verify
+
+Open In Editor
+Run
+Copy code
+https://oauth2.googleapis.com/token
+Set Up the Request Body:
+
+Go to the "Body" tab.
+Select "x-www-form-urlencoded".
+Add the following key-value pairs:
+Key	Value
+code	AUTHORIZATION_CODE (the code you copied from the previous step)
+client_id	YOUR_CLIENT_ID
+client_secret	YOUR_CLIENT_SECRET
+redirect_uri	YOUR_REDIRECT_URI (the same URI you used in the authorization request)
+grant_type	authorization_code
+Example:
+
+
+Verify
+
+Open In Editor
+Run
+Copy code
+code: AUTHORIZATION_CODE
+client_id: 1234567890-abcde12345.apps.googleusercontent.com
+client_secret: YOUR_CLIENT_SECRET
+redirect_uri: http://localhost:8080/login/oauth2/code/google
+grant_type: authorization_code
+Send the Request: Click "Send".
+
+Inspect the Response: If everything is set up correctly, you should receive a response containing the access token:
+
+json
+
+Verify
+
+Open In Editor
+Run
+Copy code
+{
+    "access_token": "ACCESS_TOKEN",
+    "expires_in": 3599,
+    "refresh_token": "REFRESH_TOKEN",
+    "scope": "profile email",
+    "token_type": "Bearer"
+}
+Step 4: Use the Access Token to Access User Information
+Create a New Request in Postman:
+
+Set the request type to GET.
+Enter the following URL to access user information:
+
+Verify
+
+Open In Editor
+Run
+Copy code
+https://www.googleapis.com/oauth2/v1/userinfo
+Set Up the Authorization Header:
+
+Go to the "Headers" tab.
+Add a new key-value pair:
+Key	Value
+Authorization	Bearer ACCESS_TOKEN
+Replace ACCESS_TOKEN with the token you received in the previous step.
+
+Send the Request: Click "Send".
+
+Inspect the Response: If the access token is valid, you should receive a response containing user information:
+
+json
+
+Verify
+
+Open In Editor
+Run
+Copy code
+{
+    "id": "1234567890",
+    "email": "user@example.com",
+    "verified_email": true,
+    "name": "User   Name",
+    "given_name": "User  ",
+    "family_name": "Name",
+    "picture": "https://example.com/user.jpg",
+    "locale": "en"
+}
+Step 5: Debugging and Logging in Your Spring Boot Application
+Check Logs: With debug logging enabled, check the console output of your Spring Boot application. You should see detailed logs of the OAuth2 process, including the requests made to the Google Authorization Server and the token exchange.
+
+Custom Success Handler: If you want to log the access token or user details after successful authentication, implement a custom AuthenticationSuccessHandler as described in previous responses. This will allow you to log the user details and any tokens generated.
+
+Inspect the Network Tab: In your browser's developer tools, you can also inspect the network requests made during the OAuth2 flow. This will show you the requests to the Google Authorization Server and the responses received.
+
+Summary of Steps
+Obtain Authorization Code:
+Make a GET request to the Google Authorization endpoint.
